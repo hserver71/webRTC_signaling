@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebRTC Signaling Server Dashboard</title>
+</head>
+<body>
+    <header>
+        <h1>WebRTC Signaling Server Dashboard</h1>
+    </header>
+    <section style="position: absolute; top: 10px; right: 10px;">
+        <span id="statusIndicator">●</span>
+        <span id="connectionStatus" >Disconnected</span>
+    </section>
+    <section style="margin-top: 20px;">
+        <table border="1" cellpadding="10" cellspacing="0" width="100%">
+            <thead>
+                <tr>
+                    <th>Total Peers</th>
+                    <th>Source Peers</th>
+                    <th>Client Peers</th>
+                    <th>Connection Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr align="center">
+                    <td><strong id="totalPeers">0</strong></td>
+                    <td><strong id="sourcePeers">0</strong></td>
+                    <td><strong id="clientPeers">0</strong></td>
+                    <td><strong id="statusText">--</strong></td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+    
+    
+    <section>
+        <table border="1" cellpadding="10" cellspacing="0" width="100%">
+            <thead>
+                <tr>
+                    <th>Peer ID</th>
+                    <th>Type</th>
+                    <th>Room</th>
+                    <th>Status</th>
+                    <th>Connected</th>
+                    <th>Time</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="peersList">
+                <tr>
+                    <td colspan="7" align="center">Connecting to signaling server...</td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+    
+    <script>
+        let ws = null;
+        let peers = [];
+        
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = protocol + '//' + window.location.host;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                updateConnectionStatus(true);
+                ws.send(JSON.stringify({ action: 'dashboard-connect' }));
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                if (data.action === 'dashboard-connected') {
+                    updateStats(data.stats);
+                    renderPeers(data.peers);
+                }
+                
+                if (data.action === 'dashboard-update') {
+                    updateStats(data.stats);
+                    renderPeers(data.peers);
+                }
+                
+                if (data.action === 'peer-removed') {
+                    if (data.success) {
+                        console.log('Peer ' + data.peerId + ' removed');
+                    }
+                }
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateConnectionStatus(false);
+            };
+            
+            ws.onclose = () => {
+                updateConnectionStatus(false);
+                setTimeout(connect, 3000);
+            };
+        }
+        
+        function updateConnectionStatus(connected) {
+            const indicator = document.getElementById('statusIndicator');
+            const status = document.getElementById('connectionStatus');
+            const statusText = document.getElementById('statusText');
+            
+            if (connected) {
+                indicator.textContent = '●';
+                status.textContent = 'Connected';
+                statusText.textContent = 'Online';
+            } else {
+                indicator.textContent = '●';
+                status.textContent = 'Disconnected';
+                statusText.textContent = 'Offline';
+            }
+        }
+        
+        function updateStats(stats) {
+            document.getElementById('totalPeers').textContent = stats.totalPeers || 0;
+            document.getElementById('sourcePeers').textContent = stats.sourcePeers || 0;
+            document.getElementById('clientPeers').textContent = stats.clientPeers || 0;
+        }
+        
+        function formatTime(timestamp) {
+            if (!timestamp) return 'Unknown';
+            const date = new Date(timestamp);
+            const now = new Date();
+            const diff = Math.floor((now - date) / 1000);
+            
+            if (diff < 60) return diff + 's ago';
+            if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+            if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+            return date.toLocaleString();
+        }
+        
+        function formatDate(timestamp) {
+            if (!timestamp) return 'Unknown';
+            return new Date(timestamp).toLocaleString();
+        }
+        
+        function renderPeers(peersList) {
+            peers = peersList || [];
+            const container = document.getElementById('peersList');
+            
+            if (peers.length === 0) {
+                container.innerHTML = '<tr><td colspan="7" align="center">No peers connected - Waiting for peer connections...</td></tr>';
+                return;
+            }
+            
+            container.innerHTML = peers.map(peer => {
+                const peerType = peer.isSource ? 'Source' : 'Client';
+                const roomId = peer.roomId || 'default';
+                return '<tr>' +
+                    '<td><strong>' + peer.peerId + '</strong></td>' +
+                    '<td>' + peerType + '</td>' +
+                    '<td>' + roomId + '</td>' +
+                    '<td>Active</td>' +
+                    '<td>' + formatTime(peer.timestamp) + '</td>' +
+                    '<td>' + formatDate(peer.timestamp) + '</td>' +
+                    '<td><button onclick="removePeer(\'' + peer.peerId + '\')">Remove</button></td>' +
+                    '</tr>';
+            }).join('');
+        }
+        
+        function removePeer(peerId) {
+            if (!confirm('Are you sure you want to remove peer "' + peerId + '"?')) {
+                return;
+            }
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    action: 'remove-peer',
+                    peerId: peerId
+                }));
+            }
+        }
+        
+        connect();
+    </script>
+</body>
+</html>
+
